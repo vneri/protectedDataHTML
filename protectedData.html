@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Self-Contained Protected Data</title>
+    <meta charset="utf-8">
+	<style>
+		*{ font-family:Courier New}
+	</style>
+	<script>
+		var encryptedDataJSON = '';
+		
+		async function genEncryptionKey (password, mode, length) {
+			var algo = {
+				name: 'PBKDF2',
+				hash: 'SHA-256',
+				salt: new TextEncoder().encode('a-unique-salt'),
+				iterations: 1000
+			};
+			var derived = { name: mode, length: length };
+			var encoded = new TextEncoder().encode(password);
+			var key = await crypto.subtle.importKey('raw', encoded, { name: 'PBKDF2' }, false, ['deriveKey']);
+
+			return crypto.subtle.deriveKey(algo, key, derived, false, ['encrypt', 'decrypt']);
+		}
+		// Encrypt function
+		async function encrypt (text, password, mode, length, ivLength) {
+			var algo = {
+				name: mode,
+				length: length,
+				iv: crypto.getRandomValues(new Uint8Array(ivLength))
+			};
+			var key = await genEncryptionKey(password, mode, length);
+			var encoded = new TextEncoder().encode(text);
+
+			return {
+				cipherText: await crypto.subtle.encrypt(algo, key, encoded),
+				iv: algo.iv
+			};
+		}
+		
+		async function decrypt (encrypted, password, mode, length) {
+			var algo = {
+				name: mode,
+				length: length,
+				iv: encrypted.iv
+			};
+			var key = await genEncryptionKey(password, mode, length);
+			var decrypted = await crypto.subtle.decrypt(algo, key, encrypted.cipherText);
+
+			return new TextDecoder().decode(decrypted);
+		}
+		
+		function performEncryption(){
+			var secretText = document.getElementById('message').value;
+			var password = document.getElementById('password').value;
+			encrypt(secretText, password, 'AES-GCM', 256, 12).then(
+				enc => 	{
+					enc.cipherText = Array.from(new Uint8Array(enc.cipherText));
+					enc.iv = Array.from(new Uint8Array(enc.iv));
+					document.getElementById('message').value = JSON.stringify(enc);
+					document.getElementById('message').innerText = JSON.stringify(enc);
+				}
+			);
+		}
+		
+		function performDecryption(){
+			var encryptedText = document.getElementById('message').value;
+			try{
+				var encryptedObject = JSON.parse(encryptedText);
+				var iv = new Uint8Array(12);
+				var cipherText = new Uint8Array(encryptedObject.cipherText.length);
+				iv = Uint8Array.from(encryptedObject.iv);
+				cipherText = Uint8Array.from(encryptedObject.cipherText);
+				encryptedObject.cipherText = cipherText;
+				encryptedObject.iv = iv;
+				var password = document.getElementById('password').value;
+				decrypt(encryptedObject, password, 'AES-GCM', 256, 12).then(
+					deenc => 	document.getElementById('message').value = deenc
+				).catch(
+					err => 
+					alert('Wrong password - '+err)
+				);
+			} catch(e){
+				alert('The text is not decryptable');
+				console.error(e);
+			}
+		}
+		
+		function saveData(data, filename){
+			var a = document.createElement("a");
+			document.body.appendChild(a);
+			a.style = "display: none";
+			blob = new Blob([data], {type:"text/html;charset=utf-8"});
+			url = window.URL.createObjectURL(blob);
+			a.href = url;
+			a.download = filename;
+			a.click();
+			window.URL.revokeObjectURL(url);
+		};
+
+		function download(){
+			saveData(document.documentElement.outerHTML, 'Self-Contained-Protected-Data.html');
+		}
+	</script>
+  </head>
+  <body>
+    <h1>This file contains encrypted data for you.<br>Enter the password to decrypt it.</h1><br>
+	<input type="password" id="password" placeholder="Decryption password" /><br>
+	<button onclick="performDecryption()">Decrypt</button>
+	<button onclick="performEncryption();" id="encButton" style="visibility:hidden">Encrypt</button><br>
+	<textarea rows="20" cols="100" id="message" style="padding:20px;font-family:courier new" >{"cipherText":[119,33,12,136,19,24,183,123,124,203,215,41,45,173,54,159,141,204,121,9,242,163,253,235,71,58,120,98,28,183,119,183,157,83,42,41,7,83,28,79,105,230,57,211,69,151,141,226,40,57,35,104,11,54,215,132,175,220,166,246,116,97,235,230,174,198,52,8,209,189,118,212,3,32,243,63,97,52,69,118,86,11,39,104,179,64,240,150,217,133,216,93,159,251,207,239,100,2,46,218,73,191,244,10,34,223,193,244,212,43,214,5,104,87,95,244,178,43,176,5,144,108,194,67,224,238,247,238,10,14,30,92,110,83,128,150,140,52,253,164,227,174,252,168,250,216,243,163,31,22,185,169,161,189,104,17,187,218,215,231,135,178,149,20,137,135,228,178,134,173,168,108,160,10,201,138,253,207,121,19,24,122,66,125,144,40,118,158,109,212,195,247,200,41,30,19,40,51,1,195,235,143,73,72,227,66,110,58,143,222,223,92,132,33,234,68,187,16,203,173,84,239,243,182,15,87,46,117,246,133,173,76,214,132,159,54,47,182,160,108,151,190,44,4,41,214,232,16,45,253,208,197,164,139,20,42,230,136,238,220,98,54,70,175,108,142,93,97,68,244,199,220,40,181,223,42,60,234,225,132,126,233,92,214,127,0,95,194,156,132,166,210,5,101,213,20,200,41,217,213],"iv":[21,76,103,15,161,91,109,252,51,81,140,79]}</textarea>
+	<br><br><small><i><u><div style="font-size:11px;cursor:pointer;" onclick="document.getElementById('encButton').style.visibility=''">Switch on encryption mode</a></u></i></small>
+	<button onclick="download()">Download this - so you can share it</button>
+  </body>
+</html>
